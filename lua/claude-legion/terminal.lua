@@ -1,4 +1,5 @@
 local config = require("claude-legion.config")
+local tmux = require("claude-legion.tmux")
 
 local M = {}
 
@@ -8,95 +9,49 @@ local state = {
   current_id = nil,
 }
 
-local function get_win_config()
-  local opts = config.options.window
-  local width = math.floor(vim.o.columns * opts.width)
-  local height = math.floor(vim.o.lines * opts.height)
+local function session_name(id)
+  return config.options.tmux.session_prefix .. id
+end
 
-  local row, col
-  if opts.position == "top" then
-    row = 0
-    col = math.floor((vim.o.columns - width) / 2)
-  elseif opts.position == "bottom" then
-    row = vim.o.lines - height
-    col = math.floor((vim.o.columns - width) / 2)
-  else -- center
-    row = math.floor((vim.o.lines - height) / 2)
-    col = math.floor((vim.o.columns - width) / 2)
+function M.create(name, opts)
+  opts = opts or {}
+  if not tmux.is_tmux() then
+    vim.notify("Claude Legion requires tmux", vim.log.levels.ERROR)
+    return nil
   end
 
-  return {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    style = "minimal",
-    border = opts.border,
-  }
-end
-
-local function open_float(buf)
-  local win_config = get_win_config()
-  local win = vim.api.nvim_open_win(buf, true, win_config)
-  vim.api.nvim_set_option_value("winhl", "Normal:Normal,FloatBorder:FloatBorder", { win = win })
-  return win
-end
-
-local function open_split(buf)
-  local opts = config.options.window
-  if opts.type == "vsplit" then
-    vim.cmd("vsplit")
-  else
-    vim.cmd("split")
+  if vim.fn.executable(config.options.cmd) == 0 then
+    vim.notify("'" .. config.options.cmd .. "' not found in PATH", vim.log.levels.ERROR)
+    return nil
   end
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(win, buf)
-  return win
-end
 
-local function open_window(buf)
-  local opts = config.options.window
-  if opts.type == "float" then
-    return open_float(buf)
-  else
-    return open_split(buf)
-  end
-end
-
-function M.create(name)
   state.counter = state.counter + 1
   local id = state.counter
   name = name or ("claude-" .. id)
 
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_set_option_value("filetype", "claude-legion", { buf = buf })
-
-  local win = open_window(buf)
-
-  vim.fn.termopen(config.options.cmd, {
-    on_exit = function()
-      if state.instances[id] then
-        state.instances[id].exited = true
-      end
-    end,
-  })
-
-  vim.cmd("startinsert")
+  local sname = session_name(id)
+  if not tmux.create_session(sname, config.options.cmd, config.options.tmux.popup_dismiss_key) then
+    vim.notify("Failed to create tmux session", vim.log.levels.ERROR)
+    return nil
+  end
 
   state.instances[id] = {
     id = id,
-    buf = buf,
-    win = win,
+    session = sname,
     name = name,
-    exited = false,
+    persistent = false,
   }
+  tmux.set_name(sname, name)
   state.current_id = id
 
+  if not opts.background then
+    M.show(id)
+  end
   return id
 end
 
 function M.toggle(id)
+  M.reconnect()
   id = id or state.current_id
 
   if not id or not state.instances[id] then
@@ -104,17 +59,12 @@ function M.toggle(id)
   end
 
   local instance = state.instances[id]
-
-  if instance.exited then
+  if not tmux.session_exists(instance.session) then
     M.kill(id)
     return M.create()
   end
 
-  if instance.win and vim.api.nvim_win_is_valid(instance.win) then
-    M.hide(id)
-  else
-    M.show(id)
-  end
+  M.show(id)
 end
 
 function M.show(id)
@@ -124,36 +74,15 @@ function M.show(id)
   end
 
   local instance = state.instances[id]
+  local opts = config.options.tmux
 
-  -- Hide any currently visible instance first (for float mode)
-  if config.options.window.type == "float" and state.current_id and state.current_id ~= id then
-    local current = state.instances[state.current_id]
-    if current and current.win and vim.api.nvim_win_is_valid(current.win) then
-      M.hide(state.current_id)
-    end
-  end
-
-  if instance.win and vim.api.nvim_win_is_valid(instance.win) then
-    vim.api.nvim_set_current_win(instance.win)
-  else
-    instance.win = open_window(instance.buf)
-  end
-
+  tmux.display_popup(instance.session, opts.popup_width, opts.popup_height)
   state.current_id = id
-  vim.cmd("startinsert")
 end
 
 function M.hide(id)
-  id = id or state.current_id
-  if not id or not state.instances[id] then
-    return
-  end
-
-  local instance = state.instances[id]
-  if instance.win and vim.api.nvim_win_is_valid(instance.win) then
-    vim.api.nvim_win_close(instance.win, true)
-    instance.win = nil
-  end
+  tmux.close_popup()
+  vim.cmd("silent! checktime")
 end
 
 function M.kill(id)
@@ -164,11 +93,10 @@ function M.kill(id)
 
   local instance = state.instances[id]
 
-  M.hide(id)
-
-  if vim.api.nvim_buf_is_valid(instance.buf) then
-    vim.api.nvim_buf_delete(instance.buf, { force = true })
+  if tmux.session_exists(instance.session) then
+    tmux.kill_session(instance.session)
   end
+  tmux.clear_popup_window()
 
   state.instances[id] = nil
 
@@ -192,18 +120,16 @@ function M.send(id, text)
   end
 
   local instance = state.instances[id]
-  if instance.exited then
+  if not tmux.session_exists(instance.session) then
     vim.notify("Claude Code instance has exited", vim.log.levels.WARN)
     return
   end
 
-  local chan = vim.b[instance.buf] and vim.b[instance.buf].terminal_job_id
-  if not chan then
-    vim.notify("No terminal channel found", vim.log.levels.ERROR)
-    return
+  if text:find("\n") then
+    tmux.send_text(instance.session, text)
+  else
+    tmux.send_keys(instance.session, text)
   end
-
-  vim.api.nvim_chan_send(chan, text .. "\n")
   M.show(id)
 end
 
@@ -212,24 +138,48 @@ function M.rename(id, new_name)
     return
   end
   state.instances[id].name = new_name
+  tmux.set_name(state.instances[id].session, new_name)
+end
+
+function M.persist(id)
+  id = id or state.current_id
+  if not id or not state.instances[id] then
+    return
+  end
+  local instance = state.instances[id]
+  instance.persistent = not instance.persistent
+  tmux.set_persistent(instance.session, instance.persistent)
+  local label = instance.persistent and "persistent" or "ephemeral"
+  vim.notify(instance.name .. " is now " .. label, vim.log.levels.INFO)
+end
+
+function M.persist_all()
+  local any_unpinned = false
+  for _, instance in pairs(state.instances) do
+    if not instance.persistent then
+      any_unpinned = true
+      break
+    end
+  end
+  -- If any unpinned, pin all. If all pinned, unpin all.
+  local new_state = any_unpinned
+  for _, instance in pairs(state.instances) do
+    instance.persistent = new_state
+    tmux.set_persistent(instance.session, new_state)
+  end
+  vim.notify(new_state and "All sessions pinned" or "All sessions unpinned", vim.log.levels.INFO)
 end
 
 function M.list()
+  M.reconnect()
   local result = {}
   for _, instance in pairs(state.instances) do
-    local visible = instance.win and vim.api.nvim_win_is_valid(instance.win)
-    local status
-    if instance.exited then
-      status = "exited"
-    elseif visible then
-      status = "visible"
-    else
-      status = "hidden"
-    end
+    local alive = tmux.session_exists(instance.session)
     table.insert(result, {
       id = instance.id,
       name = instance.name,
-      status = status,
+      status = alive and "alive" or "dead",
+      persistent = instance.persistent,
     })
   end
   table.sort(result, function(a, b)
@@ -240,6 +190,45 @@ end
 
 function M.get_current_id()
   return state.current_id
+end
+
+function M.reconnect()
+  local prefix = config.options.tmux.session_prefix
+  local sessions = tmux.list_sessions(prefix)
+  for _, sname in ipairs(sessions) do
+    local id_str = sname:sub(#prefix + 1)
+    local id = tonumber(id_str)
+    if id and not state.instances[id] then
+      local persistent = tmux.is_persistent(sname)
+      local name = tmux.get_name(sname) or ("claude-" .. id)
+      state.instances[id] = {
+        id = id,
+        session = sname,
+        name = name,
+        persistent = persistent,
+      }
+      if id > state.counter then
+        state.counter = id
+      end
+      if not state.current_id then
+        state.current_id = id
+      end
+    end
+  end
+end
+
+function M.kill_all()
+  local has_persistent = false
+  for id, instance in pairs(state.instances) do
+    if instance.persistent then
+      has_persistent = true
+    else
+      M.kill(id)
+    end
+  end
+  if not has_persistent then
+    tmux.kill_server()
+  end
 end
 
 return M

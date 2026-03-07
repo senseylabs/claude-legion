@@ -7,6 +7,8 @@ function M.setup(opts)
   local terminal = require("claude-legion.terminal")
   local picker = require("claude-legion.picker")
 
+  local tmux = require("claude-legion.tmux")
+
   -- Commands
   vim.api.nvim_create_user_command("ClaudeCode", function()
     terminal.toggle()
@@ -42,6 +44,25 @@ function M.setup(opts)
     terminal.kill()
   end, { desc = "Kill current Claude Code instance" })
 
+  vim.api.nvim_create_user_command("ClaudeCodePersist", function()
+    terminal.persist()
+  end, { desc = "Toggle persistence on current Claude Code instance" })
+
+  local worktree = require("claude-legion.worktree")
+
+  vim.api.nvim_create_user_command("ClaudeWorktreeCreate", function()
+    worktree.create_prompt()
+  end, { desc = "Create new git worktree" })
+
+  vim.api.nvim_create_user_command("ClaudeWorktreeList", function()
+    local has_telescope, _ = pcall(require, "telescope")
+    if has_telescope and config.options.telescope.enabled then
+      require("telescope").extensions.claude_code.worktrees()
+    else
+      worktree.select_worktree()
+    end
+  end, { desc = "List git worktrees" })
+
   -- Keymaps
   if config.options.set_keymaps then
     local keys = config.options.keys
@@ -50,16 +71,48 @@ function M.setup(opts)
     vim.keymap.set("n", keys.select, "<cmd>ClaudeCodeSelect<cr>", { desc = "Select Claude Code instance" })
     vim.keymap.set("v", keys.send, ":'<,'>ClaudeCodeSend<cr>", { desc = "Send to Claude Code" })
     vim.keymap.set("n", keys.kill, "<cmd>ClaudeCodeKill<cr>", { desc = "Kill Claude Code instance" })
+    local wt_keys = config.options.worktree.keys
+    vim.keymap.set("n", wt_keys.create, "<cmd>ClaudeWorktreeCreate<cr>", { desc = "Create git worktree" })
+    vim.keymap.set("n", wt_keys.list, "<cmd>ClaudeWorktreeList<cr>", { desc = "List git worktrees" })
+
+    if keys.quick_switch then
+      for i = 1, 9 do
+        vim.keymap.set("n", "<M-" .. i .. ">", function()
+          terminal.show(i)
+        end, { desc = "Switch to Claude Code instance " .. i })
+      end
+    end
   end
 
-  -- Auto-reload files modified by Claude
-  vim.api.nvim_create_autocmd("BufEnter", {
-    group = vim.api.nvim_create_augroup("ClaudeLegionReload", { clear = true }),
+  -- Auto-close/reopen popup when switching tmux windows (Cmd+1-9)
+  if tmux.is_tmux() then
+    tmux.setup_popup_auto_close(config.options.tmux.popup_width, config.options.tmux.popup_height)
+  end
+
+  -- Re-adopt orphaned sessions from a previous neovim instance
+  terminal.reconnect()
+
+  -- Kill all claude sessions when neovim exits cleanly
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = vim.api.nvim_create_augroup("ClaudeLegionCleanup", { clear = true }),
     callback = function()
-      local buf_ft = vim.bo.filetype
-      if buf_ft ~= "claude-legion" then
-        vim.cmd("silent! checktime")
-      end
+      terminal.kill_all()
+      tmux.cleanup_popup_auto_close()
+    end,
+  })
+
+  -- Auto-reload files modified by Claude when switching back
+  local augroup = vim.api.nvim_create_augroup("ClaudeLegionReload", { clear = true })
+  vim.api.nvim_create_autocmd("FocusGained", {
+    group = augroup,
+    callback = function()
+      vim.cmd("silent! checktime")
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = augroup,
+    callback = function()
+      vim.cmd("silent! checktime")
     end,
   })
 

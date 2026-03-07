@@ -5,15 +5,10 @@ local M = {}
 function M.select()
   local instances = terminal.list()
 
-  if #instances == 0 then
-    terminal.create()
-    return
-  end
-
   local items = {}
   for _, inst in ipairs(instances) do
     table.insert(items, {
-      label = string.format("[%s] %s (#%d)", inst.status, inst.name, inst.id),
+      label = (inst.persistent and "📌 " or "   ") .. inst.name,
       id = inst.id,
     })
   end
