@@ -7,8 +7,9 @@ function M.select()
 
   local items = {}
   for _, inst in ipairs(instances) do
+    local type_icon = inst.type == "shell" and "🐚 " or "🤖 "
     table.insert(items, {
-      label = inst.id .. ". " .. (inst.persistent and "📌 " or "   ") .. inst.name,
+      label = inst.id .. ". " .. (inst.persistent and "📌 " or "   ") .. type_icon .. inst.name,
       id = inst.id,
     })
   end

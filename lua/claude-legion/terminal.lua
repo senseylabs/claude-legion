@@ -11,26 +11,30 @@ end
 
 function M.create(name, opts)
   opts = opts or {}
+  local is_shell = opts.shell or false
+
   if not tmux.is_tmux() then
     vim.notify("Claude Legion requires tmux", vim.log.levels.ERROR)
     return nil
   end
 
-  if vim.fn.executable(config.options.cmd) == 0 then
+  if not is_shell and vim.fn.executable(config.options.cmd) == 0 then
     vim.notify("'" .. config.options.cmd .. "' not found in PATH", vim.log.levels.ERROR)
     return nil
   end
 
-  name = name or "claude"
+  name = name or (is_shell and "shell" or "claude")
 
   local sname = session_name()
-  local window_id = tmux.create_window(sname, config.options.cmd, config.options.tmux.popup_dismiss_key)
+  local cmd = not is_shell and config.options.cmd or nil
+  local window_id = tmux.create_window(sname, cmd, config.options.tmux.popup_dismiss_key)
   if not window_id then
     vim.notify("Failed to create tmux window", vim.log.levels.ERROR)
     return nil
   end
 
   tmux.set_name(sname, window_id, name)
+  tmux.set_type(sname, window_id, is_shell and "shell" or "claude")
   state.current_id = window_id
 
   if not opts.background then
@@ -170,6 +174,7 @@ function M.list()
       name = win.name or "claude",
       status = "alive",
       persistent = win.persistent,
+      type = win.type or "claude",
     })
   end
   return result

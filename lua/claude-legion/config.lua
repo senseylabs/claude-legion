@@ -11,9 +11,10 @@ M.defaults = {
   keys = {
     toggle = "<leader>ac",
     new = "<leader>an",
-    select = "<leader>at",
+    select = "<leader>aa",
     send = "<leader>as",
     kill = "<leader>ak",
+    terminal = "<leader>at",
     quick_switch = true,
   },
   set_keymaps = true,

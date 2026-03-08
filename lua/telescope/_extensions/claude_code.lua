@@ -43,13 +43,14 @@ local function claude_code_picker(opts, select_id)
   pickers
     .new(opts, {
       initial_mode = "normal",
-      prompt_title = "Claude Legion  a:new x:kill s:pin S:pin-all r:rename J/K:move",
+      prompt_title = "Claude Legion  a:new t:shell x:kill s:pin S:pin-all r:rename J/K:move",
       default_selection_index = default_selection,
       finder = finders.new_table({
         results = instances,
         entry_maker = function(entry)
           local pin = entry.persistent and "📌 " or "   "
-          local display = entry.id .. ". " .. pin .. entry.name
+          local type_icon = entry.type == "shell" and "🐚 " or "🤖 "
+          local display = entry.id .. ". " .. pin .. type_icon .. entry.name
           return {
             value = entry,
             display = display,
@@ -91,6 +92,14 @@ local function claude_code_picker(opts, select_id)
         local function action_new()
           actions.close(prompt_bufnr)
           local new_id = terminal.create(nil, { background = true })
+          vim.schedule(function()
+            claude_code_picker(opts, new_id)
+          end)
+        end
+
+        local function action_new_shell()
+          actions.close(prompt_bufnr)
+          local new_id = terminal.create(nil, { background = true, shell = true })
           vim.schedule(function()
             claude_code_picker(opts, new_id)
           end)
@@ -170,12 +179,14 @@ local function claude_code_picker(opts, select_id)
         end
 
         map("i", "<C-a>", action_new)
+        map("i", "<C-t>", action_new_shell)
         map("i", "<C-x>", action_kill)
         map("i", "<C-s>", action_pin)
         map("i", "<C-S>", action_pin_all)
         map("i", "<C-r>", action_rename)
 
         map("n", "a", action_new)
+        map("n", "t", action_new_shell)
         map("n", "x", action_kill)
         map("n", "s", action_pin)
         map("n", "S", action_pin_all)

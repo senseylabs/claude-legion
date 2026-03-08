@@ -19,6 +19,11 @@ function M.setup(opts)
     terminal.create(name)
   end, { nargs = "?", desc = "Create new Claude Code instance" })
 
+  vim.api.nvim_create_user_command("ClaudeTerminal", function(cmd_opts)
+    local name = cmd_opts.args ~= "" and cmd_opts.args or nil
+    terminal.create(name, { shell = true })
+  end, { nargs = "?", desc = "Create new plain terminal" })
+
   vim.api.nvim_create_user_command("ClaudeCodeSelect", function()
     local has_telescope, _ = pcall(require, "telescope")
     if has_telescope and config.options.telescope.enabled then
@@ -68,7 +73,8 @@ function M.setup(opts)
     local keys = config.options.keys
     vim.keymap.set("n", keys.toggle, "<cmd>ClaudeCode<cr>", { desc = "Toggle Claude Code" })
     vim.keymap.set("n", keys.new, "<cmd>ClaudeCodeNew<cr>", { desc = "New Claude Code instance" })
-    vim.keymap.set("n", keys.select, "<cmd>ClaudeCodeSelect<cr>", { desc = "Select Claude Code instance" })
+    vim.keymap.set("n", keys.select, "<cmd>ClaudeCodeSelect<cr>", { desc = "List all terminals" })
+    vim.keymap.set("n", keys.terminal, "<cmd>ClaudeTerminal<cr>", { desc = "New plain terminal" })
     vim.keymap.set("v", keys.send, ":'<,'>ClaudeCodeSend<cr>", { desc = "Send to Claude Code" })
     vim.keymap.set("n", keys.kill, "<cmd>ClaudeCodeKill<cr>", { desc = "Kill Claude Code instance" })
     local wt_keys = config.options.worktree.keys

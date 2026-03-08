@@ -69,9 +69,11 @@ function M.create_window(session_name, cmd, detach_key)
     end
     window_id = next_id
   end
-  -- Start the command
-  local target = session_name .. ":" .. window_id
-  run(srv("send-keys -t " .. vim.fn.shellescape(target) .. " " .. vim.fn.shellescape(cmd) .. " Enter"))
+  -- Start the command (if provided)
+  if cmd then
+    local target = session_name .. ":" .. window_id
+    run(srv("send-keys -t " .. vim.fn.shellescape(target) .. " " .. vim.fn.shellescape(cmd) .. " Enter"))
+  end
   return window_id
 end
 
@@ -141,21 +143,23 @@ end
 --- Returns a list of { id = number, persistent = bool, name = string|nil }.
 function M.list_windows_full(session_name)
   local sep = "|||"
-  local fmt = "#{window_index}" .. sep .. "#{@claude_persistent}" .. sep .. "#{@claude_name}"
+  local fmt = "#{window_index}" .. sep .. "#{@claude_persistent}" .. sep .. "#{@claude_name}" .. sep .. "#{@claude_type}"
   local ok, output = run(srv("list-windows -t " .. vim.fn.shellescape(session_name) .. " -F " .. vim.fn.shellescape(fmt)))
   if not ok then
     return {}
   end
   local results = {}
   for line in output:gmatch("[^\n]+") do
-    local idx_str, persist_str, name_str = line:match("^(.-)|||(.-)|||(.*)$")
+    local idx_str, persist_str, name_str, type_str = line:match("^(.-)|||(.-)|||(.-)|||(.*)$")
     local idx = tonumber(vim.trim(idx_str or ""))
     if idx then
       local name = (name_str and vim.trim(name_str) ~= "") and vim.trim(name_str) or nil
+      local wtype = (type_str and vim.trim(type_str) ~= "") and vim.trim(type_str) or "claude"
       table.insert(results, {
         id = idx,
         persistent = vim.trim(persist_str or "") == "1",
         name = name,
+        type = wtype,
       })
     end
   end
@@ -184,6 +188,11 @@ end
 function M.set_name(session_name, window_id, name)
   local target = session_name .. ":" .. window_id
   srv_async("set-option -w -t " .. vim.fn.shellescape(target) .. " @claude_name " .. vim.fn.shellescape(name))
+end
+
+function M.set_type(session_name, window_id, wtype)
+  local target = session_name .. ":" .. window_id
+  srv_async("set-option -w -t " .. vim.fn.shellescape(target) .. " @claude_type " .. vim.fn.shellescape(wtype))
 end
 
 function M.get_name(session_name, window_id)
