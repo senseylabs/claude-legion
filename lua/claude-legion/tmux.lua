@@ -255,6 +255,16 @@ function M.cleanup_toggle_key(key)
   run_async("tmux unbind-key -n " .. key)
 end
 
+function M.capture_pane(session_name, window_id)
+  local target = session_name .. ":" .. window_id
+  local cmd = srv("capture-pane -t " .. vim.fn.shellescape(target) .. " -p -e")
+  local output = vim.fn.system(cmd)
+  if vim.v.shell_error == 0 then
+    return output
+  end
+  return nil
+end
+
 function M.send_text(session_name, window_id, text)
   local target = session_name .. ":" .. window_id
   local tmpfile = vim.fn.tempname()

@@ -5,12 +5,14 @@ end
 
 local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
+local previewers = require("telescope.previewers")
 local conf = require("telescope.config").values
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
 
 local terminal = require("claude-legion.terminal")
 local worktree = require("claude-legion.worktree")
+local ansi = require("claude-legion.ansi")
 
 local function claude_code_picker(opts, select_id)
   opts = opts or {}
@@ -56,6 +58,27 @@ local function claude_code_picker(opts, select_id)
         end,
       }),
       sorter = conf.generic_sorter(opts),
+      previewer = previewers.new_buffer_previewer({
+        title = "Terminal Preview",
+        define_preview = function(self, entry)
+          local bufnr = self.state.bufnr
+          if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+            return
+          end
+          local ok, err = pcall(function()
+            local output = terminal.capture_pane(entry.value.id)
+            if not output or output == "" then
+              vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "(no output)" })
+              return
+            end
+            local parsed = ansi.parse(output)
+            ansi.apply(bufnr, parsed)
+          end)
+          if not ok then
+            pcall(vim.api.nvim_buf_set_lines, bufnr, 0, -1, false, { "(preview error: " .. tostring(err) .. ")" })
+          end
+        end,
+      }),
       attach_mappings = function(prompt_bufnr, map)
         actions.select_default:replace(function()
           actions.close(prompt_bufnr)

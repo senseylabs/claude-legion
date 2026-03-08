@@ -175,6 +175,10 @@ function M.list()
   return result
 end
 
+function M.capture_pane(id)
+  return tmux.capture_pane(session_name(), id)
+end
+
 function M.get_current_id()
   return state.current_id
 end
