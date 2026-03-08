@@ -11,14 +11,12 @@ local function srv(tmux_args)
   return "tmux -L " .. SERVER .. " " .. tmux_args
 end
 
-local function setup_detach_key(key)
-  run(srv("bind-key -n " .. key .. " detach-client"))
-end
-
-function M.setup_quick_switch_keys()
+local function build_key_bindings(detach_key)
+  local parts = { "bind-key -n " .. detach_key .. " detach-client" }
   for i = 1, 9 do
-    run(srv("bind-key -n M-" .. i .. " select-window -t :" .. i))
+    table.insert(parts, "bind-key -n M-" .. i .. " select-window -t :" .. i)
   end
+  return table.concat(parts, " \\; ")
 end
 
 function M.is_tmux()
@@ -39,19 +37,17 @@ end
 function M.create_window(session_name, cmd, detach_key)
   local window_id
   if not M.session_exists(session_name) then
-    local ok, _ = run(srv("new-session -d -s " .. vim.fn.shellescape(session_name)))
+    -- Batch: new-session + set-option + bind-keys + move-window in one call
+    local esc_name = vim.fn.shellescape(session_name)
+    local chain = "new-session -d -s " .. esc_name
+      .. " \\; set-option -t " .. esc_name .. " status off"
+      .. " \\; set-option -t " .. esc_name .. " base-index 1"
+      .. " \\; " .. build_key_bindings(detach_key or "C-]")
+      .. " \\; move-window -s " .. esc_name .. ":0 -t " .. esc_name .. ":1"
+    local ok, _ = run(srv(chain))
     if not ok then
       return nil
     end
-    -- Hide status bar so popup looks clean
-    run(srv("set-option -t " .. vim.fn.shellescape(session_name) .. " status off"))
-    -- Start window numbering at 1
-    run(srv("set-option -t " .. vim.fn.shellescape(session_name) .. " base-index 1"))
-    -- Set up server-global keys
-    setup_detach_key(detach_key or "C-]")
-    M.setup_quick_switch_keys()
-    -- The default window is 0; move it to 1 (base-index)
-    run(srv("move-window -s " .. vim.fn.shellescape(session_name) .. ":0 -t " .. vim.fn.shellescape(session_name) .. ":1"))
     window_id = 1
   else
     -- Create window at the end (after the highest index)
@@ -105,7 +101,7 @@ function M.display_popup(session_name, window_id, width, height)
     "tmux display-popup -w %d%% -h %d%% -E %s",
     width,
     height,
-    vim.fn.shellescape("TMUX='' " .. attach_cmd)
+    vim.fn.shellescape("TMUX='' " .. attach_cmd .. " || true")
   )
   vim.fn.jobstart(cmd)
 end
@@ -208,7 +204,7 @@ function M.setup_popup_auto_close(width, height)
   local script = string.format([[#!/bin/sh
 sess=$(tmux display-message -p '#{@claude_popup}')
 if [ -n "$sess" ]; then
-  tmux display-popup -w %d%% -h %d%% -E "TMUX='' tmux -L claude-legion attach-session -t \"$sess\""
+  tmux display-popup -w %d%% -h %d%% -E "TMUX='' tmux -L claude-legion attach-session -t \"$sess\" || true"
 else
   tmux display-popup -C 2>/dev/null
 fi
@@ -238,7 +234,7 @@ function M.setup_toggle_key(key, width, height)
   local script = string.format([[#!/bin/sh
 sess=$(tmux display-message -p '#{@claude_popup}')
 if [ -n "$sess" ]; then
-  tmux display-popup -w %d%% -h %d%% -E "TMUX='' tmux -L claude-legion attach-session -t \"$sess\""
+  tmux display-popup -w %d%% -h %d%% -E "TMUX='' tmux -L claude-legion attach-session -t \"$sess\" || true"
 fi
 ]], width, height)
   local f = io.open(script_path, "w")
