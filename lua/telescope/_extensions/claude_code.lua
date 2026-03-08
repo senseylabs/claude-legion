@@ -18,12 +18,23 @@ local function claude_code_picker(opts, select_id)
   local instances = terminal.list()
 
   local default_selection = nil
-  if select_id then
+  if select_id and #instances > 0 then
     for i, inst in ipairs(instances) do
       if inst.id == select_id then
         default_selection = i
         break
       end
+    end
+    -- If exact match not found (e.g. after delete), pick closest position
+    if not default_selection then
+      for i, inst in ipairs(instances) do
+        if inst.id >= select_id then
+          default_selection = i
+          break
+        end
+      end
+      -- If all remaining are before the deleted id, pick the last one
+      default_selection = default_selection or #instances
     end
   end
 
@@ -56,19 +67,20 @@ local function claude_code_picker(opts, select_id)
 
         local function action_new()
           actions.close(prompt_bufnr)
-          terminal.create(nil, { background = true })
+          local new_id = terminal.create(nil, { background = true })
           vim.schedule(function()
-            claude_code_picker(opts)
+            claude_code_picker(opts, new_id)
           end)
         end
 
         local function action_kill()
           local selection = action_state.get_selected_entry()
           if selection then
+            local killed_id = selection.value.id
             terminal.kill(selection.value.id)
             actions.close(prompt_bufnr)
             vim.schedule(function()
-              claude_code_picker(opts)
+              claude_code_picker(opts, killed_id)
             end)
           end
         end
@@ -79,7 +91,7 @@ local function claude_code_picker(opts, select_id)
             terminal.persist(selection.value.id)
             actions.close(prompt_bufnr)
             vim.schedule(function()
-              claude_code_picker(opts)
+              claude_code_picker(opts, selection.value.id)
             end)
           end
         end
@@ -92,7 +104,7 @@ local function claude_code_picker(opts, select_id)
                 terminal.rename(selection.value.id, new_name)
                 actions.close(prompt_bufnr)
                 vim.schedule(function()
-                  claude_code_picker(opts)
+                  claude_code_picker(opts, selection.value.id)
                 end)
               end
             end)

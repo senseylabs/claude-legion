@@ -63,17 +63,19 @@ function M.create_window(session_name, cmd, detach_key)
     run(srv("move-window -s " .. vim.fn.shellescape(session_name) .. ":0 -t " .. vim.fn.shellescape(session_name) .. ":1"))
     window_id = 1
   else
-    -- Let tmux auto-assign the next index
-    local ok, _ = run(srv("new-window -a -t " .. vim.fn.shellescape(session_name)))
+    -- Create window at the end (after the highest index)
+    local windows = M.list_windows(session_name)
+    local next_id = 1
+    for _, idx in ipairs(windows) do
+      if idx >= next_id then
+        next_id = idx + 1
+      end
+    end
+    local ok, _ = run(srv("new-window -t " .. vim.fn.shellescape(session_name) .. ":" .. next_id))
     if not ok then
       return nil
     end
-    -- Read back the index tmux assigned
-    local _, output = run(srv("display-message -t " .. vim.fn.shellescape(session_name) .. " -p '#{window_index}'"))
-    window_id = tonumber(output)
-    if not window_id then
-      return nil
-    end
+    window_id = next_id
   end
   -- Start the command
   local target = session_name .. ":" .. window_id
