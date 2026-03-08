@@ -200,9 +200,7 @@ function M.kill_all()
     if win.persistent then
       has_persistent = true
     else
-      if tmux.window_exists(sname, win.id) then
-        tmux.kill_window(sname, win.id)
-      end
+      tmux.kill_window(sname, win.id)
     end
   end
   if has_persistent then
