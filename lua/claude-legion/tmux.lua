@@ -1,5 +1,6 @@
 local utils = require("claude-legion.utils")
 local run = utils.run
+local run_async = utils.run_async
 
 local M = {}
 
@@ -9,6 +10,10 @@ local HOOK_INDEX = 99
 
 local function srv(tmux_args)
   return "tmux -L " .. SERVER .. " " .. tmux_args
+end
+
+local function srv_async(tmux_args)
+  run_async(srv(tmux_args))
 end
 
 local function build_key_bindings(detach_key)
@@ -164,9 +169,9 @@ end
 function M.set_persistent(session_name, window_id, persistent)
   local target = session_name .. ":" .. window_id
   if persistent then
-    run(srv("set-option -w -t " .. vim.fn.shellescape(target) .. " @claude_persistent 1"))
+    srv_async("set-option -w -t " .. vim.fn.shellescape(target) .. " @claude_persistent 1")
   else
-    run(srv("set-option -wu -t " .. vim.fn.shellescape(target) .. " @claude_persistent"))
+    srv_async("set-option -wu -t " .. vim.fn.shellescape(target) .. " @claude_persistent")
   end
 end
 
@@ -178,7 +183,7 @@ end
 
 function M.set_name(session_name, window_id, name)
   local target = session_name .. ":" .. window_id
-  run(srv("set-option -w -t " .. vim.fn.shellescape(target) .. " @claude_name " .. vim.fn.shellescape(name)))
+  srv_async("set-option -w -t " .. vim.fn.shellescape(target) .. " @claude_name " .. vim.fn.shellescape(name))
 end
 
 function M.get_name(session_name, window_id)
@@ -191,11 +196,11 @@ function M.get_name(session_name, window_id)
 end
 
 function M.mark_popup_window(session_name)
-  run("tmux set-option -w @claude_popup " .. vim.fn.shellescape(session_name))
+  run_async("tmux set-option -w @claude_popup " .. vim.fn.shellescape(session_name))
 end
 
 function M.clear_popup_window()
-  run("tmux set-option -wu @claude_popup")
+  run_async("tmux set-option -wu @claude_popup")
 end
 
 function M.setup_popup_auto_close(width, height)
@@ -223,7 +228,7 @@ end
 
 function M.cleanup_popup_auto_close()
   local hook_name = vim.fn.shellescape("after-select-window[" .. HOOK_INDEX .. "]")
-  run("tmux set-hook -gu " .. hook_name)
+  run_async("tmux set-hook -gu " .. hook_name)
 end
 
 function M.setup_toggle_key(key, width, height)
@@ -247,7 +252,7 @@ fi
 end
 
 function M.cleanup_toggle_key(key)
-  run("tmux unbind-key -n " .. key)
+  run_async("tmux unbind-key -n " .. key)
 end
 
 function M.send_text(session_name, window_id, text)

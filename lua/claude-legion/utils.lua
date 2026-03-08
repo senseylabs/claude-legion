@@ -5,4 +5,8 @@ function M.run(cmd)
   return vim.v.shell_error == 0, vim.trim(output)
 end
 
+function M.run_async(cmd)
+  vim.fn.jobstart(cmd, { detach = true })
+end
+
 return M
