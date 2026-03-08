@@ -16,9 +16,6 @@ local function ensure_server()
   if server_initialized then
     return
   end
-  -- The server starts automatically when a session is created.
-  -- We set up a no-prefix binding so the user can detach (dismiss popup).
-  -- This runs after the first session exists; bind-key is global per server.
   server_initialized = true
 end
 
@@ -28,7 +25,7 @@ end
 
 function M.setup_quick_switch_keys()
   for i = 1, 9 do
-    run(srv("bind-key -n M-" .. i .. " switch-client -t '#{s/-[0-9]+$/-" .. i .. "/:session_name}'"))
+    run(srv("bind-key -n M-" .. i .. " select-window -t :" .. i))
   end
 end
 
@@ -36,34 +33,80 @@ function M.is_tmux()
   return vim.env.TMUX ~= nil and vim.env.TMUX ~= ""
 end
 
-function M.create_session(name, cmd, detach_key)
-  ensure_server()
-  local ok, _ = run(srv("new-session -d -s " .. vim.fn.shellescape(name)))
-  if not ok then
-    return false
-  end
-  -- Hide status bar so popup looks clean
-  run(srv("set-option -t " .. vim.fn.shellescape(name) .. " status off"))
-  -- Set up detach key (idempotent, global to server)
-  setup_detach_key(detach_key or "C-]")
-  -- Set up quick-switch keys (idempotent, runs after server exists)
-  M.setup_quick_switch_keys()
-  -- Start the command
-  run(srv("send-keys -t " .. vim.fn.shellescape(name) .. " " .. vim.fn.shellescape(cmd) .. " Enter"))
-  return true
-end
-
 function M.session_exists(name)
   local ok, _ = run(srv("has-session -t " .. vim.fn.shellescape(name)))
   return ok
+end
+
+function M.window_exists(session_name, window_id)
+  local target = session_name .. ":" .. window_id
+  local ok, _ = run(srv("display-message -t " .. vim.fn.shellescape(target) .. " -p '#{window_index}'"))
+  return ok
+end
+
+function M.create_window(session_name, cmd, detach_key)
+  ensure_server()
+  local window_id
+  if not M.session_exists(session_name) then
+    local ok, _ = run(srv("new-session -d -s " .. vim.fn.shellescape(session_name)))
+    if not ok then
+      return nil
+    end
+    -- Hide status bar so popup looks clean
+    run(srv("set-option -t " .. vim.fn.shellescape(session_name) .. " status off"))
+    -- Start window numbering at 1
+    run(srv("set-option -t " .. vim.fn.shellescape(session_name) .. " base-index 1"))
+    -- Set up server-global keys
+    setup_detach_key(detach_key or "C-]")
+    M.setup_quick_switch_keys()
+    -- The default window is 0; move it to 1 (base-index)
+    run(srv("move-window -s " .. vim.fn.shellescape(session_name) .. ":0 -t " .. vim.fn.shellescape(session_name) .. ":1"))
+    window_id = 1
+  else
+    -- Let tmux auto-assign the next index
+    local ok, _ = run(srv("new-window -a -t " .. vim.fn.shellescape(session_name)))
+    if not ok then
+      return nil
+    end
+    -- Read back the index tmux assigned
+    local _, output = run(srv("display-message -t " .. vim.fn.shellescape(session_name) .. " -p '#{window_index}'"))
+    window_id = tonumber(output)
+    if not window_id then
+      return nil
+    end
+  end
+  -- Start the command
+  local target = session_name .. ":" .. window_id
+  run(srv("send-keys -t " .. vim.fn.shellescape(target) .. " " .. vim.fn.shellescape(cmd) .. " Enter"))
+  return window_id
+end
+
+function M.kill_window(session_name, window_id)
+  local target = session_name .. ":" .. window_id
+  run(srv("kill-window -t " .. vim.fn.shellescape(target)))
+end
+
+function M.renumber_windows(session_name)
+  if not M.session_exists(session_name) then
+    return
+  end
+  run(srv("move-window -r -s " .. vim.fn.shellescape(session_name) .. " -t " .. vim.fn.shellescape(session_name)))
+end
+
+function M.swap_windows(session_name, from_id, to_id)
+  local src = session_name .. ":" .. from_id
+  local dst = session_name .. ":" .. to_id
+  run(srv("swap-window -s " .. vim.fn.shellescape(src) .. " -t " .. vim.fn.shellescape(dst)))
 end
 
 function M.kill_session(name)
   run(srv("kill-session -t " .. vim.fn.shellescape(name)))
 end
 
-function M.display_popup(session_name, width, height)
+function M.display_popup(session_name, window_id, width, height)
   M.mark_popup_window(session_name)
+  -- Pre-select the desired window
+  run(srv("select-window -t " .. vim.fn.shellescape(session_name .. ":" .. window_id)))
   local attach_cmd = "tmux -L " .. SERVER .. " attach-session -t " .. vim.fn.shellescape(session_name)
   local cmd = string.format(
     "tmux display-popup -w %d%% -h %d%% -E %s",
@@ -79,54 +122,56 @@ function M.close_popup()
   run("tmux display-popup -C")
 end
 
-function M.send_keys(session_name, text)
-  run(srv("send-keys -t " .. vim.fn.shellescape(session_name) .. " -l " .. vim.fn.shellescape(text)))
-  run(srv("send-keys -t " .. vim.fn.shellescape(session_name) .. " Enter"))
+function M.send_keys(session_name, window_id, text)
+  local target = session_name .. ":" .. window_id
+  run(srv("send-keys -t " .. vim.fn.shellescape(target) .. " -l " .. vim.fn.shellescape(text)))
+  run(srv("send-keys -t " .. vim.fn.shellescape(target) .. " Enter"))
 end
 
-function M.list_sessions(prefix)
-  local ok, output = run(srv("list-sessions -F '#{session_name}'"))
+function M.list_windows(session_name)
+  local ok, output = run(srv("list-windows -t " .. vim.fn.shellescape(session_name) .. " -F '#{window_index}'"))
   if not ok then
     return {}
   end
-  local sessions = {}
+  local windows = {}
   for line in output:gmatch("[^\n]+") do
-    local name = vim.trim(line)
-    if not prefix or name:sub(1, #prefix) == prefix then
-      table.insert(sessions, name)
+    local idx = tonumber(vim.trim(line))
+    if idx then
+      table.insert(windows, idx)
     end
   end
-  return sessions
+  return windows
 end
 
 function M.kill_server()
   run(srv("kill-server"))
 end
 
-function M.set_persistent(session_name, persistent)
+function M.set_persistent(session_name, window_id, persistent)
+  local target = session_name .. ":" .. window_id
   if persistent then
-    run(srv("set-environment -t " .. vim.fn.shellescape(session_name) .. " CLAUDE_LEGION_PERSISTENT 1"))
+    run(srv("set-option -w -t " .. vim.fn.shellescape(target) .. " @claude_persistent 1"))
   else
-    run(srv("set-environment -t " .. vim.fn.shellescape(session_name) .. " -u CLAUDE_LEGION_PERSISTENT"))
+    run(srv("set-option -wu -t " .. vim.fn.shellescape(target) .. " @claude_persistent"))
   end
 end
 
-function M.is_persistent(session_name)
-  local ok, output = run(srv("show-environment -t " .. vim.fn.shellescape(session_name) .. " CLAUDE_LEGION_PERSISTENT"))
-  return ok and output:match("=1") ~= nil
+function M.is_persistent(session_name, window_id)
+  local target = session_name .. ":" .. window_id
+  local ok, output = run(srv("show-options -wv -t " .. vim.fn.shellescape(target) .. " @claude_persistent"))
+  return ok and vim.trim(output) == "1"
 end
 
-function M.set_name(session_name, name)
-  run(srv("set-environment -t " .. vim.fn.shellescape(session_name) .. " CLAUDE_LEGION_NAME " .. vim.fn.shellescape(name)))
+function M.set_name(session_name, window_id, name)
+  local target = session_name .. ":" .. window_id
+  run(srv("set-option -w -t " .. vim.fn.shellescape(target) .. " @claude_name " .. vim.fn.shellescape(name)))
 end
 
-function M.get_name(session_name)
-  local ok, output = run(srv("show-environment -t " .. vim.fn.shellescape(session_name) .. " CLAUDE_LEGION_NAME"))
-  if ok then
-    local name = output:match("=(.+)")
-    if name and name ~= "" then
-      return name
-    end
+function M.get_name(session_name, window_id)
+  local target = session_name .. ":" .. window_id
+  local ok, output = run(srv("show-options -wv -t " .. vim.fn.shellescape(target) .. " @claude_name"))
+  if ok and output ~= "" then
+    return vim.trim(output)
   end
   return nil
 end
@@ -163,7 +208,32 @@ function M.cleanup_popup_auto_close()
   run("tmux set-hook -gu after-select-window")
 end
 
-function M.send_text(session_name, text)
+function M.setup_toggle_key(key, width, height)
+  -- Bind key in outer tmux to reopen popup when it's closed.
+  -- When popup is open, the inner tmux catches the key and detaches (closing popup).
+  -- When popup is closed, the outer tmux catches the key and reopens it.
+  local script_path = vim.fn.stdpath("data") .. "/claude-legion-toggle.sh"
+  local script = string.format([[#!/bin/sh
+sess=$(tmux display-message -p '#{@claude_popup}')
+if [ -n "$sess" ]; then
+  tmux display-popup -w %d%% -h %d%% -E "TMUX='' tmux -L claude-legion attach-session -t \"$sess\""
+fi
+]], width, height)
+  local f = io.open(script_path, "w")
+  if f then
+    f:write(script)
+    f:close()
+    os.execute("chmod +x " .. vim.fn.shellescape(script_path))
+  end
+  run("tmux bind-key -n " .. key .. " run-shell " .. vim.fn.shellescape(script_path))
+end
+
+function M.cleanup_toggle_key(key)
+  run("tmux unbind-key -n " .. key)
+end
+
+function M.send_text(session_name, window_id, text)
+  local target = session_name .. ":" .. window_id
   local tmpfile = vim.fn.tempname()
   local f = io.open(tmpfile, "w")
   if not f then
@@ -172,7 +242,7 @@ function M.send_text(session_name, text)
   f:write(text)
   f:close()
   run(srv("load-buffer " .. vim.fn.shellescape(tmpfile)))
-  run(srv("paste-buffer -t " .. vim.fn.shellescape(session_name)))
+  run(srv("paste-buffer -t " .. vim.fn.shellescape(target)))
   os.remove(tmpfile)
 end
 

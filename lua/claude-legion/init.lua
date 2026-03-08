@@ -87,6 +87,7 @@ function M.setup(opts)
   -- Auto-close/reopen popup when switching tmux windows (Cmd+1-9)
   if tmux.is_tmux() then
     tmux.setup_popup_auto_close(config.options.tmux.popup_width, config.options.tmux.popup_height)
+    tmux.setup_toggle_key(config.options.tmux.popup_dismiss_key, config.options.tmux.popup_width, config.options.tmux.popup_height)
   end
 
   -- Re-adopt orphaned sessions from a previous neovim instance
@@ -98,6 +99,7 @@ function M.setup(opts)
     callback = function()
       terminal.kill_all()
       tmux.cleanup_popup_auto_close()
+      tmux.cleanup_toggle_key(config.options.tmux.popup_dismiss_key)
     end,
   })
 

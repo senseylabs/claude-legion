@@ -12,20 +12,31 @@ local action_state = require("telescope.actions.state")
 local terminal = require("claude-legion.terminal")
 local worktree = require("claude-legion.worktree")
 
-local function claude_code_picker(opts)
+local function claude_code_picker(opts, select_id)
   opts = opts or {}
 
   local instances = terminal.list()
 
+  local default_selection = nil
+  if select_id then
+    for i, inst in ipairs(instances) do
+      if inst.id == select_id then
+        default_selection = i
+        break
+      end
+    end
+  end
+
   pickers
     .new(opts, {
       initial_mode = "normal",
-      prompt_title = "Claude Legion  a:new x:kill s:pin S:pin-all r:rename",
+      prompt_title = "Claude Legion  a:new x:kill s:pin S:pin-all r:rename J/K:move",
+      default_selection_index = default_selection,
       finder = finders.new_table({
         results = instances,
         entry_maker = function(entry)
           local pin = entry.persistent and "📌 " or "   "
-          local display = pin .. entry.name
+          local display = entry.id .. ". " .. pin .. entry.name
           return {
             value = entry,
             display = display,
@@ -96,6 +107,33 @@ local function claude_code_picker(opts)
           end)
         end
 
+        local function action_move_up()
+          local selection = action_state.get_selected_entry()
+          if selection and selection.value.id > 1 then
+            local new_id = selection.value.id - 1
+            terminal.move(selection.value.id, new_id)
+            actions.close(prompt_bufnr)
+            vim.schedule(function()
+              claude_code_picker(opts, new_id)
+            end)
+          end
+        end
+
+        local function action_move_down()
+          local selection = action_state.get_selected_entry()
+          if selection then
+            local all = terminal.list()
+            if selection.value.id < #all then
+              local new_id = selection.value.id + 1
+              terminal.move(selection.value.id, new_id)
+              actions.close(prompt_bufnr)
+              vim.schedule(function()
+                claude_code_picker(opts, new_id)
+              end)
+            end
+          end
+        end
+
         map("i", "<C-a>", action_new)
         map("i", "<C-x>", action_kill)
         map("i", "<C-s>", action_pin)
@@ -107,6 +145,8 @@ local function claude_code_picker(opts)
         map("n", "s", action_pin)
         map("n", "S", action_pin_all)
         map("n", "r", action_rename)
+        map("n", "K", action_move_up)
+        map("n", "J", action_move_down)
 
         return true
       end,

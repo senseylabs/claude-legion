@@ -5,7 +5,7 @@ M.defaults = {
     popup_width = 90,
     popup_height = 90,
     session_prefix = "claude-legion-",
-    popup_dismiss_key = "C-]",
+    popup_dismiss_key = "M-g",
   },
   cmd = "claude",
   keys = {
@@ -42,8 +42,9 @@ end
 
 function M.setup(opts)
   M.options = vim.tbl_deep_extend("force", {}, M.defaults, opts or {})
-  -- Scope session prefix to project directory
-  M.options.tmux.session_prefix = M.options.tmux.session_prefix .. project_hash() .. "-"
+  -- Scope session name to project directory
+  M.options.tmux.session_name = M.options.tmux.session_prefix .. project_hash()
+  M.options.tmux.session_prefix = M.options.tmux.session_name .. "-"
 end
 
 return M

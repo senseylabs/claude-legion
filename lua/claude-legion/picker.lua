@@ -8,7 +8,7 @@ function M.select()
   local items = {}
   for _, inst in ipairs(instances) do
     table.insert(items, {
-      label = (inst.persistent and "📌 " or "   ") .. inst.name,
+      label = inst.id .. ". " .. (inst.persistent and "📌 " or "   ") .. inst.name,
       id = inst.id,
     })
   end

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo TMUX=$TMUX:*)",
+      "Bash(tmux list-hooks:*)",
+      "Bash(tmux set-hook:*)",
+      "Bash(tmux:*)",
+      "Bash(lua:*)",
+      "Bash(tmux show-option:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(col:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}
