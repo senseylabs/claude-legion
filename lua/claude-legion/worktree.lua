@@ -1,9 +1,7 @@
-local M = {}
+local utils = require("claude-legion.utils")
+local run = utils.run
 
-local function run(cmd)
-  local output = vim.fn.system(cmd)
-  return vim.v.shell_error == 0, vim.trim(output)
-end
+local M = {}
 
 function M.sanitize_branch(name)
   return name:gsub("/", "-"):gsub("[^%w%-%._]", "")
@@ -52,6 +50,17 @@ function M.list_worktrees()
   end
 
   return worktrees
+end
+
+--- Look up the branch name for a worktree by its path.
+local function get_branch_for_worktree(path)
+  local worktrees = M.list_worktrees()
+  for _, wt in ipairs(worktrees) do
+    if wt.path == path then
+      return wt.branch
+    end
+  end
+  return nil
 end
 
 function M.open_window(path, name)
@@ -117,7 +126,8 @@ end
 function M.remove_worktree(path, opts)
   opts = opts or {}
   local dir_name = vim.fn.fnamemodify(path, ":t")
-  local branch = dir_name -- branch name matches directory name
+  -- Query the actual branch name from git worktree metadata
+  local branch = get_branch_for_worktree(path)
 
   local function do_remove()
     local ok, output = run("git worktree remove --force " .. vim.fn.shellescape(path))
@@ -125,8 +135,10 @@ function M.remove_worktree(path, opts)
       vim.notify("Failed to remove worktree: " .. output, vim.log.levels.ERROR)
       return
     end
-    -- Delete the branch
-    run("git branch -D " .. vim.fn.shellescape(branch))
+    -- Delete the branch if we found one
+    if branch then
+      run("git branch -D " .. vim.fn.shellescape(branch))
+    end
     vim.notify("Removed worktree and branch: " .. dir_name, vim.log.levels.INFO)
     if opts.on_complete then
       opts.on_complete()

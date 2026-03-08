@@ -24,18 +24,17 @@ local function rebuild_state()
   local old_current = state.current_id
   local new_instances = {}
   local max_id = 0
-  local windows = tmux.list_windows(sname)
-  for _, window_id in ipairs(windows) do
-    local persistent = tmux.is_persistent(sname, window_id)
-    local name = tmux.get_name(sname, window_id) or "claude"
-    new_instances[window_id] = {
-      id = window_id,
+  -- Single tmux call to fetch all window data
+  local windows = tmux.list_windows_full(sname)
+  for _, win in ipairs(windows) do
+    new_instances[win.id] = {
+      id = win.id,
       session = sname,
-      name = name,
-      persistent = persistent,
+      name = win.name or "claude",
+      persistent = win.persistent,
     }
-    if window_id > max_id then
-      max_id = window_id
+    if win.id > max_id then
+      max_id = win.id
     end
   end
   state.instances = new_instances
@@ -89,7 +88,6 @@ function M.create(name, opts)
 end
 
 function M.toggle(id)
-  M.reconnect()
   id = id or state.current_id
 
   if not id or not state.instances[id] then
@@ -105,6 +103,7 @@ function M.toggle(id)
 end
 
 function M.show(id)
+  M.reconnect()
   id = id or state.current_id
   if not id or not state.instances[id] then
     return
@@ -115,7 +114,7 @@ function M.show(id)
   state.current_id = id
 end
 
-function M.hide(id)
+function M.hide()
   tmux.close_popup()
   vim.cmd("silent! checktime")
 end
@@ -238,35 +237,39 @@ function M.reconnect()
   if not tmux.session_exists(sname) then
     return
   end
-  local windows = tmux.list_windows(sname)
-  for _, window_id in ipairs(windows) do
-    if not state.instances[window_id] then
-      local persistent = tmux.is_persistent(sname, window_id)
-      local wname = tmux.get_name(sname, window_id) or "claude"
-      state.instances[window_id] = {
-        id = window_id,
+  -- Single tmux call to fetch all window data
+  local windows = tmux.list_windows_full(sname)
+  for _, win in ipairs(windows) do
+    if not state.instances[win.id] then
+      state.instances[win.id] = {
+        id = win.id,
         session = sname,
-        name = wname,
-        persistent = persistent,
+        name = win.name or "claude",
+        persistent = win.persistent,
       }
-      if window_id > state.counter then
-        state.counter = window_id
+      if win.id > state.counter then
+        state.counter = win.id
       end
       if not state.current_id then
-        state.current_id = window_id
+        state.current_id = win.id
       end
     end
   end
 end
 
 function M.kill_all()
+  -- Collect IDs to kill first to avoid mutating state.instances while iterating
+  local to_kill = {}
   local has_persistent = false
   for id, instance in pairs(state.instances) do
     if instance.persistent then
       has_persistent = true
     else
-      M.kill(id)
+      table.insert(to_kill, id)
     end
+  end
+  for _, id in ipairs(to_kill) do
+    M.kill(id)
   end
   if not has_persistent then
     tmux.kill_session(session_name())

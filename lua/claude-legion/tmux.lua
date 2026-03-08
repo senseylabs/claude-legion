@@ -1,22 +1,14 @@
+local utils = require("claude-legion.utils")
+local run = utils.run
+
 local M = {}
 
 local SERVER = "claude-legion"
-local server_initialized = false
-
-local function run(cmd)
-  local output = vim.fn.system(cmd)
-  return vim.v.shell_error == 0, vim.trim(output)
-end
+-- Use a high numeric index to avoid colliding with user hooks (tmux arrays are numeric)
+local HOOK_INDEX = 99
 
 local function srv(tmux_args)
   return "tmux -L " .. SERVER .. " " .. tmux_args
-end
-
-local function ensure_server()
-  if server_initialized then
-    return
-  end
-  server_initialized = true
 end
 
 local function setup_detach_key(key)
@@ -45,7 +37,6 @@ function M.window_exists(session_name, window_id)
 end
 
 function M.create_window(session_name, cmd, detach_key)
-  ensure_server()
   local window_id
   if not M.session_exists(session_name) then
     local ok, _ = run(srv("new-session -d -s " .. vim.fn.shellescape(session_name)))
@@ -145,6 +136,31 @@ function M.list_windows(session_name)
   return windows
 end
 
+--- Fetch window index, persistent flag, and name in a single tmux call.
+--- Returns a list of { id = number, persistent = bool, name = string|nil }.
+function M.list_windows_full(session_name)
+  local sep = "|||"
+  local fmt = "#{window_index}" .. sep .. "#{@claude_persistent}" .. sep .. "#{@claude_name}"
+  local ok, output = run(srv("list-windows -t " .. vim.fn.shellescape(session_name) .. " -F " .. vim.fn.shellescape(fmt)))
+  if not ok then
+    return {}
+  end
+  local results = {}
+  for line in output:gmatch("[^\n]+") do
+    local idx_str, persist_str, name_str = line:match("^(.-)|||(.-)|||(.*)$")
+    local idx = tonumber(vim.trim(idx_str or ""))
+    if idx then
+      local name = (name_str and vim.trim(name_str) ~= "") and vim.trim(name_str) or nil
+      table.insert(results, {
+        id = idx,
+        persistent = vim.trim(persist_str or "") == "1",
+        name = name,
+      })
+    end
+  end
+  return results
+end
+
 function M.kill_server()
   run(srv("kill-server"))
 end
@@ -203,11 +219,15 @@ fi
     f:close()
     os.execute("chmod +x " .. vim.fn.shellescape(script_path))
   end
-  run("tmux set-hook -g after-select-window " .. vim.fn.shellescape("run-shell " .. script_path))
+  -- Use a hook array entry to avoid clobbering user hooks
+  -- Quote the hook name to prevent shell glob expansion of [N]
+  local hook_name = vim.fn.shellescape("after-select-window[" .. HOOK_INDEX .. "]")
+  run("tmux set-hook -g " .. hook_name .. " " .. vim.fn.shellescape("run-shell " .. script_path))
 end
 
 function M.cleanup_popup_auto_close()
-  run("tmux set-hook -gu after-select-window")
+  local hook_name = vim.fn.shellescape("after-select-window[" .. HOOK_INDEX .. "]")
+  run("tmux set-hook -gu " .. hook_name)
 end
 
 function M.setup_toggle_key(key, width, height)
