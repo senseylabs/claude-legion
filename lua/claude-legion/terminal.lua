@@ -177,7 +177,7 @@ function M.persist_all()
   end
   local new_val = any_unpinned
   for _, win in ipairs(windows) do
-    tmux.set_persistent(sname, win.id, new_val)
+    tmux.set_persistent_sync(sname, win.id, new_val)
   end
   vim.notify(new_val and "All sessions pinned" or "All sessions unpinned", vim.log.levels.INFO)
 end
@@ -238,7 +238,8 @@ function M.reconnect()
   end
   local windows = tmux.list_windows_full(sname)
   if #windows > 0 then
-    state.current_id = windows[1].id
+    local active = tmux.get_active_window(sname)
+    state.current_id = active or windows[1].id
     return true
   else
     state.current_id = nil

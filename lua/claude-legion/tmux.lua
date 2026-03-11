@@ -46,18 +46,14 @@ function M.create_window(session_name, cmd)
     run(srv("move-window -s " .. esc_name .. ":0 -t " .. esc_name .. ":1"))
     window_id = 1
   else
-    local windows = M.list_windows(session_name)
-    local next_id = 1
-    for _, idx in ipairs(windows) do
-      if idx >= next_id then
-        next_id = idx + 1
-      end
-    end
-    local ok, _ = run(srv("new-window -t " .. vim.fn.shellescape(session_name) .. ":" .. next_id))
+    local ok, output = run(srv("new-window -t " .. vim.fn.shellescape(session_name) .. " -a -P -F '#{window_index}'"))
     if not ok then
       return nil
     end
-    window_id = next_id
+    window_id = tonumber(vim.trim(output))
+    if not window_id then
+      return nil
+    end
   end
   if cmd then
     local target = session_name .. ":" .. window_id
@@ -260,6 +256,11 @@ function M.send_text(session_name, window_id, text)
   run(srv("load-buffer " .. vim.fn.shellescape(tmpfile)))
   run(srv("paste-buffer -t " .. vim.fn.shellescape(target)))
   os.remove(tmpfile)
+end
+
+function M.send_enter(session_name, window_id)
+  local target = session_name .. ":" .. window_id
+  run(srv("send-keys -t " .. vim.fn.shellescape(target) .. " Enter"))
 end
 
 return M

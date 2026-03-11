@@ -1,6 +1,17 @@
 local M = {}
 
 function M.setup(opts)
+  -- Skip setup when Neovim is spawned as Claude's editor (prevents infinite loop)
+  if vim.env.CLAUDECODE == "1" then
+    return
+  end
+
+  -- Skip setup when Neovim is running inside the claude-legion tmux server
+  -- (e.g. Ctrl+G editor from Claude Code opens Neovim inside managed tmux)
+  if vim.env.TMUX and vim.env.TMUX:find("claude%-legion") then
+    return
+  end
+
   local config = require("claude-legion.config")
   config.setup(opts)
 
@@ -35,15 +46,24 @@ function M.setup(opts)
   end, { desc = "Select Claude Code instance" })
 
   vim.api.nvim_create_user_command("ClaudeCodeSend", function(cmd_opts)
-    local lines
+    local file = vim.fn.expand("%:p")  -- absolute path
     if cmd_opts.range > 0 then
-      lines = vim.api.nvim_buf_get_lines(0, cmd_opts.line1 - 1, cmd_opts.line2, false)
+      local lines = vim.api.nvim_buf_get_lines(0, cmd_opts.line1 - 1, cmd_opts.line2, false)
+      local context = file .. ":" .. cmd_opts.line1 .. "-" .. cmd_opts.line2 .. ":\n```\n"
+        .. table.concat(lines, "\n") .. "\n```"
+      vim.ui.input({ prompt = "Message (empty to send just the code): " }, function(msg)
+        local text = msg and msg ~= "" and (msg .. "\n\n" .. context) or context
+        terminal.send(nil, text)
+      end)
     else
-      vim.notify("Select text first (visual mode)", vim.log.levels.WARN)
-      return
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local location = file .. ":" .. cursor[1]
+      vim.ui.input({ prompt = "Message: ", default = location .. " " }, function(msg)
+        if msg and msg ~= "" then
+          terminal.send(nil, msg)
+        end
+      end)
     end
-    local text = table.concat(lines, "\n")
-    terminal.send(nil, text)
   end, { range = true, desc = "Send selection to Claude Code" })
 
   vim.api.nvim_create_user_command("ClaudeCodeKill", function()
@@ -76,7 +96,8 @@ function M.setup(opts)
     vim.keymap.set("n", keys.new, "<cmd>ClaudeCodeNew<cr>", { desc = "New Claude Code instance" })
     vim.keymap.set("n", keys.select, "<cmd>ClaudeCodeSelect<cr>", { desc = "List all terminals" })
     vim.keymap.set("n", keys.terminal, "<cmd>ClaudeTerminal<cr>", { desc = "New plain terminal" })
-    vim.keymap.set("v", keys.send, ":'<,'>ClaudeCodeSend<cr>", { desc = "Send to Claude Code" })
+    vim.keymap.set("v", keys.send, ":'<,'>ClaudeCodeSend<cr>", { desc = "Send selection to Claude Code" })
+    vim.keymap.set("n", keys.send, "<cmd>ClaudeCodeSend<cr>", { desc = "Send file context to Claude Code" })
     vim.keymap.set("n", keys.kill, "<cmd>ClaudeCodeKill<cr>", { desc = "Kill Claude Code instance" })
     local wt_keys = config.options.worktree.keys
     vim.keymap.set("n", wt_keys.create, "<cmd>ClaudeWorktreeCreate<cr>", { desc = "Create git worktree" })
@@ -86,6 +107,9 @@ function M.setup(opts)
     if keys.quick_switch then
       for i = 1, 9 do
         vim.keymap.set("n", "<M-" .. i .. ">", function()
+          if not tmux.is_tmux() then
+            return
+          end
           local sname = project.get_session_name(project.get_project_root())
           if not tmux.session_exists(sname) then
             return

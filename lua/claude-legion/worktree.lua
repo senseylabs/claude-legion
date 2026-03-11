@@ -64,14 +64,17 @@ local function get_branch_for_worktree(path)
 end
 
 function M.open_window(path, name)
-  local ok, win_index = run("tmux display-message -p '#{window_index}'")
+  -- Get the outer tmux session/window explicitly to avoid ambiguity
+  -- when the claude-legion split pane is focused
+  local ok, session_info = run("tmux display-message -p '#{session_name}:#{window_index}'")
   if not ok then
     vim.notify("Failed to get tmux window index", vim.log.levels.ERROR)
     return
   end
+  session_info = vim.trim(session_info)
   local cmd = string.format(
-    "tmux new-window -a -t :%s -n %s -c %s",
-    vim.fn.shellescape(win_index),
+    "tmux new-window -a -t %s -n %s -c %s",
+    vim.fn.shellescape(session_info),
     vim.fn.shellescape(name),
     vim.fn.shellescape(path)
   )
