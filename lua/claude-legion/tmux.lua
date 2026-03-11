@@ -48,11 +48,12 @@ function M.create_window(session_name, cmd, detach_key)
       .. " \\; set-option -t " .. esc_name .. " status off"
       .. " \\; set-option -t " .. esc_name .. " base-index 1"
       .. " \\; " .. build_key_bindings(detach_key or "C-]")
-      .. " \\; move-window -s " .. esc_name .. ":0 -t " .. esc_name .. ":1"
     local ok, _ = run(srv(chain))
     if not ok then
       return nil
     end
+    -- Move window 0→1 if needed (may already be at 1 if user's tmux.conf sets base-index 1)
+    run(srv("move-window -s " .. esc_name .. ":0 -t " .. esc_name .. ":1"))
     window_id = 1
   else
     -- Create window at the end (after the highest index)
