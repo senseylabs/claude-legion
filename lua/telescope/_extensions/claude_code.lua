@@ -13,29 +13,41 @@ local action_state = require("telescope.actions.state")
 local terminal = require("claude-legion.terminal")
 local worktree = require("claude-legion.worktree")
 local ansi = require("claude-legion.ansi")
+local split = require("claude-legion.split")
+local tmux = require("claude-legion.tmux")
 
-local function claude_code_picker(opts, select_id)
+-- Fix #2: select_key is now {id, session_name} to disambiguate across sessions
+local function claude_code_picker(opts, select_key)
   opts = opts or {}
 
-  local instances = terminal.list()
+  local instances = terminal.list_all()
 
   local default_selection = nil
-  if select_id and #instances > 0 then
+  if select_key and #instances > 0 then
+    -- Exact match on both id and session_name
     for i, inst in ipairs(instances) do
-      if inst.id == select_id then
+      if inst.id == select_key.id and inst.session_name == select_key.session_name then
         default_selection = i
         break
       end
     end
-    -- If exact match not found (e.g. after delete), pick closest position
-    if not default_selection then
+    -- Fallback: nearest id in the same session (guard against nil id from failed create)
+    if not default_selection and select_key.id then
       for i, inst in ipairs(instances) do
-        if inst.id >= select_id then
+        if inst.session_name == select_key.session_name and inst.id >= select_key.id then
           default_selection = i
           break
         end
       end
-      -- If all remaining are before the deleted id, pick the last one
+    end
+    -- Last resort: last entry in that session, or last entry overall
+    if not default_selection then
+      for i = #instances, 1, -1 do
+        if instances[i].session_name == select_key.session_name then
+          default_selection = i
+          break
+        end
+      end
       default_selection = default_selection or #instances
     end
   end
@@ -50,11 +62,11 @@ local function claude_code_picker(opts, select_id)
         entry_maker = function(entry)
           local pin = entry.persistent and "📌 " or "   "
           local type_icon = entry.type == "shell" and "🐚 " or "🤖 "
-          local display = entry.id .. ". " .. pin .. type_icon .. entry.name
+          local display = entry.project_display .. " - " .. entry.name .. "  " .. pin .. type_icon
           return {
             value = entry,
             display = display,
-            ordinal = entry.name .. " " .. entry.status,
+            ordinal = entry.project_display .. " " .. entry.name,
           }
         end,
       }),
@@ -67,7 +79,7 @@ local function claude_code_picker(opts, select_id)
             return
           end
           local ok, err = pcall(function()
-            local output = terminal.capture_pane(entry.value.id)
+            local output = terminal.capture_pane(entry.value.id, entry.value.session_name)
             if not output or output == "" then
               vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "(no output)" })
               return
@@ -85,34 +97,43 @@ local function claude_code_picker(opts, select_id)
           actions.close(prompt_bufnr)
           local selection = action_state.get_selected_entry()
           if selection then
-            terminal.show(selection.value.id)
+            tmux.select_window(selection.value.session_name, selection.value.id)
+            split.open(selection.value.session_name)
           end
         end)
 
+        local function make_key(id, sname)
+          return { id = id, session_name = sname }
+        end
+
         local function action_new()
           actions.close(prompt_bufnr)
+          local project = require("claude-legion.project")
+          local cur_session = project.get_session_name(project.get_project_root())
           local new_id = terminal.create(nil, { background = true })
           vim.schedule(function()
-            claude_code_picker(opts, new_id)
+            claude_code_picker(opts, new_id and make_key(new_id, cur_session) or nil)
           end)
         end
 
         local function action_new_shell()
           actions.close(prompt_bufnr)
+          local project = require("claude-legion.project")
+          local cur_session = project.get_session_name(project.get_project_root())
           local new_id = terminal.create(nil, { background = true, shell = true })
           vim.schedule(function()
-            claude_code_picker(opts, new_id)
+            claude_code_picker(opts, new_id and make_key(new_id, cur_session) or nil)
           end)
         end
 
         local function action_kill()
           local selection = action_state.get_selected_entry()
           if selection then
-            local killed_id = selection.value.id
-            terminal.kill(selection.value.id)
+            local key = make_key(selection.value.id, selection.value.session_name)
+            terminal.kill(selection.value.id, selection.value.session_name)
             actions.close(prompt_bufnr)
             vim.schedule(function()
-              claude_code_picker(opts, killed_id)
+              claude_code_picker(opts, key)
             end)
           end
         end
@@ -120,10 +141,10 @@ local function claude_code_picker(opts, select_id)
         local function action_pin()
           local selection = action_state.get_selected_entry()
           if selection then
-            terminal.persist(selection.value.id)
+            terminal.persist(selection.value.id, selection.value.session_name)
             actions.close(prompt_bufnr)
             vim.schedule(function()
-              claude_code_picker(opts, selection.value.id)
+              claude_code_picker(opts, make_key(selection.value.id, selection.value.session_name))
             end)
           end
         end
@@ -133,12 +154,12 @@ local function claude_code_picker(opts, select_id)
           if selection then
             vim.ui.input({ prompt = "Rename: ", default = selection.value.name }, function(new_name)
               if new_name and new_name ~= "" then
-                terminal.rename(selection.value.id, new_name)
-                actions.close(prompt_bufnr)
-                vim.schedule(function()
-                  claude_code_picker(opts, selection.value.id)
-                end)
+                terminal.rename(selection.value.id, new_name, selection.value.session_name)
               end
+              pcall(actions.close, prompt_bufnr)
+              vim.schedule(function()
+                claude_code_picker(opts, make_key(selection.value.id, selection.value.session_name))
+              end)
             end)
           end
         end
@@ -154,11 +175,12 @@ local function claude_code_picker(opts, select_id)
         local function action_move_up()
           local selection = action_state.get_selected_entry()
           if selection and selection.value.id > 1 then
+            local sname = selection.value.session_name
             local new_id = selection.value.id - 1
-            terminal.move(selection.value.id, new_id)
+            terminal.move(selection.value.id, new_id, sname)
             actions.close(prompt_bufnr)
             vim.schedule(function()
-              claude_code_picker(opts, new_id)
+              claude_code_picker(opts, make_key(new_id, sname))
             end)
           end
         end
@@ -166,13 +188,18 @@ local function claude_code_picker(opts, select_id)
         local function action_move_down()
           local selection = action_state.get_selected_entry()
           if selection then
-            local all = terminal.list()
-            if selection.value.id < #all then
+            local sname = selection.value.session_name
+            local windows = tmux.list_windows(sname)
+            local max_id = 0
+            for _, idx in ipairs(windows) do
+              if idx > max_id then max_id = idx end
+            end
+            if selection.value.id < max_id then
               local new_id = selection.value.id + 1
-              terminal.move(selection.value.id, new_id)
+              terminal.move(selection.value.id, new_id, sname)
               actions.close(prompt_bufnr)
               vim.schedule(function()
-                claude_code_picker(opts, new_id)
+                claude_code_picker(opts, make_key(new_id, sname))
               end)
             end
           end

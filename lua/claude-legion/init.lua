@@ -6,7 +6,8 @@ function M.setup(opts)
 
   local terminal = require("claude-legion.terminal")
   local picker = require("claude-legion.picker")
-
+  local project = require("claude-legion.project")
+  local split = require("claude-legion.split")
   local tmux = require("claude-legion.tmux")
 
   -- Commands
@@ -81,31 +82,52 @@ function M.setup(opts)
     vim.keymap.set("n", wt_keys.create, "<cmd>ClaudeWorktreeCreate<cr>", { desc = "Create git worktree" })
     vim.keymap.set("n", wt_keys.list, "<cmd>ClaudeWorktreeList<cr>", { desc = "List git worktrees" })
 
+    -- Fix #10: guard quick-switch with session_exists check
     if keys.quick_switch then
       for i = 1, 9 do
         vim.keymap.set("n", "<M-" .. i .. ">", function()
-          terminal.show(i)
+          local sname = project.get_session_name(project.get_project_root())
+          if not tmux.session_exists(sname) then
+            return
+          end
+          tmux.select_window(sname, i)
+          split.open(sname)
         end, { desc = "Switch to Claude Code instance " .. i })
       end
     end
   end
 
-  -- Auto-close/reopen popup when switching tmux windows (Cmd+1-9)
-  if tmux.is_tmux() then
-    tmux.setup_popup_auto_close(config.options.tmux.popup_width, config.options.tmux.popup_height)
-    tmux.setup_toggle_key(config.options.tmux.popup_dismiss_key, config.options.tmux.popup_width, config.options.tmux.popup_height)
+  -- Fix #4: DirChanged closes stale split when new project has no session
+  vim.api.nvim_create_autocmd("DirChanged", {
+    group = vim.api.nvim_create_augroup("ClaudeLegionDirChanged", { clear = true }),
+    callback = function()
+      terminal.reconnect()
+      if split.is_open() then
+        local root = project.get_project_root()
+        local sname = project.get_session_name(root)
+        if tmux.session_exists(sname) then
+          split.switch_session(sname)
+        else
+          split.close()
+        end
+      end
+    end,
+  })
+
+  -- Re-adopt orphaned sessions and auto-open split if found
+  local found = terminal.reconnect()
+  if found and tmux.is_tmux() then
+    vim.schedule(function()
+      local sname = project.get_session_name(project.get_project_root())
+      split.open(sname)
+    end)
   end
 
-  -- Re-adopt orphaned sessions from a previous neovim instance
-  terminal.reconnect()
-
-  -- Kill all claude sessions when neovim exits cleanly
+  -- Close the split pane on exit (sessions persist in tmux)
   vim.api.nvim_create_autocmd("VimLeavePre", {
     group = vim.api.nvim_create_augroup("ClaudeLegionCleanup", { clear = true }),
     callback = function()
-      terminal.kill_all()
-      tmux.cleanup_popup_auto_close()
-      tmux.cleanup_toggle_key(config.options.tmux.popup_dismiss_key)
+      split.cleanup()
     end,
   })
 
