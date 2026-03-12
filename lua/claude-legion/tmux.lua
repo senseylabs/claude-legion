@@ -263,4 +263,38 @@ function M.send_enter(session_name, window_id)
   run(srv("send-keys -t " .. vim.fn.shellescape(target) .. " Enter"))
 end
 
+--- Batch-query pane_title and pane_dead for all panes in a session (one tmux call).
+--- Returns { [window_index] = { pane_title = string, dead = boolean } }
+function M.get_pane_statuses(session_name)
+  local sep = "|||"
+  local fmt = "#{window_index}" .. sep .. "#{pane_title}" .. sep .. "#{pane_dead}"
+  local ok, output = run(srv("list-panes -s -t " .. vim.fn.shellescape(session_name)
+    .. " -F " .. vim.fn.shellescape(fmt)))
+  if not ok or not output or output == "" then return {} end
+  local statuses = {}
+  for line in output:gmatch("[^\n]+") do
+    local idx_str, title, dead_str = line:match("^(.-)|||(.-)|||(.*)$")
+    local idx = tonumber(vim.trim(idx_str or ""))
+    if idx then
+      statuses[idx] = {
+        pane_title = vim.trim(title or ""),
+        dead = vim.trim(dead_str or "") == "1",
+      }
+    end
+  end
+  return statuses
+end
+
+--- Capture last N lines of a pane (stripped of ANSI escapes by tmux)
+function M.capture_pane_tail(session_name, window_id, lines)
+  lines = lines or 5
+  local target = session_name .. ":" .. window_id
+  local cmd = srv("capture-pane -t " .. vim.fn.shellescape(target) .. " -p -S -" .. lines)
+  local output = vim.fn.system(cmd)
+  if vim.v.shell_error == 0 then
+    return output
+  end
+  return nil
+end
+
 return M
