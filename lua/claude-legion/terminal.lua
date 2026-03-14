@@ -2,6 +2,7 @@ local config = require("claude-legion.config")
 local tmux = require("claude-legion.tmux")
 local project = require("claude-legion.project")
 local split = require("claude-legion.split")
+local status = require("claude-legion.status")
 
 local M = {}
 
@@ -182,65 +183,26 @@ function M.persist_all()
   vim.notify(new_val and "All sessions pinned" or "All sessions unpinned", vim.log.levels.INFO)
 end
 
---- Resolve status for a window given its pane data.
---- Always tries pane_title first (works for any Claude Code process regardless of @claude_type).
---- Falls back to content matching only when pane_title is unrecognized (actual shell processes).
-local function resolve_status(win, pane, sname)
-  if pane.dead then return "dead" end
-  local status = M.parse_pane_title_status(pane.pane_title)
-  if status == "busy" then
-    local tail = tmux.capture_pane_tail(sname, win.id, 3)
-    if tail and tail:find("Esc to cancel") then
-      return "input"
-    end
-    return "busy"
-  end
-  if status then return status end
-  -- pane_title not recognized — use content matching for shell instances
-  return M.get_shell_status(win.id, sname)
-end
-
 function M.list()
   local sname = session_name()
   local windows = tmux.list_windows_full(sname)
-  local statuses = tmux.get_pane_statuses(sname)
   local identity = project.get_project_identity()
-  local result = {}
-  for _, win in ipairs(windows) do
-    local pane = statuses[win.id] or {}
-    table.insert(result, {
-      id = win.id,
-      name = win.name or "claude",
-      status = resolve_status(win, pane, sname),
-      persistent = win.persistent,
-      type = win.type or "claude",
-      session_name = sname,
-      project_display = identity.display,
-    })
-  end
-  return result
+  return status.build_instance_list({
+    { session_name = sname, windows = windows, display_name = identity.display },
+  })
 end
 
 function M.list_all()
   local sessions = project.list_all_sessions()
-  local results = {}
+  local entries = {}
   for _, sess in ipairs(sessions) do
-    local windows = tmux.list_windows_full(sess.session_name)
-    local statuses = tmux.get_pane_statuses(sess.session_name)
-    for _, win in ipairs(windows) do
-      local pane = statuses[win.id] or {}
-      table.insert(results, {
-        id = win.id,
-        name = win.name or "claude",
-        status = resolve_status(win, pane, sess.session_name),
-        persistent = win.persistent,
-        type = win.type or "claude",
-        session_name = sess.session_name,
-        project_display = sess.display_name,
-      })
-    end
+    table.insert(entries, {
+      session_name = sess.session_name,
+      windows = tmux.list_windows_full(sess.session_name),
+      display_name = sess.display_name,
+    })
   end
-  return results
+  return status.build_instance_list(entries)
 end
 
 function M.capture_pane(id, target_session)
@@ -248,56 +210,11 @@ function M.capture_pane(id, target_session)
   return tmux.capture_pane(sname, id)
 end
 
---- Parse a pane_title string into a status.
---- Claude Code sets pane_title via OSC escape sequences:
----   "\xe2\x9c\xb3 Claude Code" (U+2733, eight spoked asterisk) = idle
----   "\xe2\xa0\x90 Claude Code" / "\xe2\xa0\x82 Claude Code" (braille spinner) = busy
---- Returns "idle", "busy", or nil (title not recognized as Claude Code).
-function M.parse_pane_title_status(title)
-  if not title or title == "" then return nil end
-  -- Claude Code idle: title starts with ✳ (U+2733)
-  if title:find("^\xe2\x9c\xb3") then return "idle" end
-  -- Claude Code busy: title contains "Claude Code" but doesn't start with ✳
-  -- (braille spinner characters like ⠐ ⠂ precede "Claude Code")
-  if title:find("Claude Code") then return "busy" end
-  -- Not a Claude Code title (shell or other process)
-  return nil
-end
-
---- Detect shell instance status via content matching.
-function M.get_shell_status(id, sname)
-  local output = tmux.capture_pane_tail(sname, id, 3)
-  if not output then return "idle" end
-  local clean = output:gsub("\27%[[%d;]*[A-Za-z]", "")
-  local last_line = ""
-  for line in clean:gmatch("[^\n]+") do
-    local stripped = line:gsub("%s", "")
-    if stripped ~= "" then last_line = line end
-  end
-  if last_line:match("[%$%%#>]%s*$") then return "idle" end
-  return "busy"
-end
-
 --- Detect instance status using pane_title (primary) with content fallback.
 --- Returns "idle", "busy", "input", or "dead".
 function M.get_status(id, target_session)
   local sname = target_session or session_name()
-  local statuses = tmux.get_pane_statuses(sname)
-  local pane = statuses[id]
-  if not pane then return "idle" end
-  if pane.dead then return "dead" end
-  local status = M.parse_pane_title_status(pane.pane_title)
-  if status == "busy" then
-    -- Check if actually waiting for user input
-    local tail = tmux.capture_pane_tail(sname, id, 3)
-    if tail and tail:find("Esc to cancel") then
-      status = "input"
-    end
-  elseif not status then
-    -- pane_title not recognized — use content matching for shell instances
-    status = M.get_shell_status(id, sname)
-  end
-  return status
+  return status.get_status(id, sname)
 end
 
 function M.get_current_id()

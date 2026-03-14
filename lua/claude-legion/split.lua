@@ -30,8 +30,9 @@ function M.open(session_name)
     return
   end
 
-  -- If pane already showing this session, done (no focus steal)
+  -- If pane already showing this session, just focus it
   if pane_exists() and state.current_session == session_name then
+    run("tmux select-pane -t " .. vim.fn.shellescape(state.pane_id))
     return
   end
 
@@ -51,9 +52,9 @@ function M.open(session_name)
   local width = math.floor(config.options.tmux.split_width * 100 + 0.5)
   local attach_cmd = "env -u TMUX tmux -L claude-legion attach-session -t " .. vim.fn.shellescape(session_name)
 
-  -- -d keeps focus in Neovim; user navigates to pane with C-l
+  -- Split and focus the new pane automatically
   local ok, output = run(
-    "tmux split-window -h -d -l " .. width .. "% -P -F '#{pane_id}' " .. vim.fn.shellescape(attach_cmd)
+    "tmux split-window -h -l " .. width .. "% -P -F '#{pane_id}' " .. vim.fn.shellescape(attach_cmd)
   )
   if ok and output ~= "" then
     state.pane_id = vim.trim(output)

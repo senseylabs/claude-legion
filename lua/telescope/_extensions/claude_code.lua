@@ -52,23 +52,27 @@ local function claude_code_picker(opts, select_key)
     end
   end
 
-  pickers
-    .new(opts, {
+  local status_icons = require("claude-legion.config").status_icons
+
+  local function make_entry(entry)
+    local pin = entry.persistent and "📌 " or "   "
+    local type_icon = entry.type == "shell" and "🐚 " or "🤖 "
+    local status_icon = status_icons[entry.status] or status_icons.unknown
+    local display = status_icon .. " " .. entry.project_display .. " - " .. entry.name .. "  " .. pin .. type_icon
+    return {
+      value = entry,
+      display = display,
+      ordinal = entry.project_display .. " " .. entry.name,
+    }
+  end
+
+  local picker_obj = pickers.new(opts, {
       initial_mode = "normal",
       prompt_title = "Claude Legion  a:new t:shell x:kill s:pin S:pin-all r:rename J/K:move",
       default_selection_index = default_selection,
       finder = finders.new_table({
         results = instances,
-        entry_maker = function(entry)
-          local pin = entry.persistent and "📌 " or "   "
-          local type_icon = entry.type == "shell" and "🐚 " or "🤖 "
-          local display = entry.project_display .. " - " .. entry.name .. "  " .. pin .. type_icon
-          return {
-            value = entry,
-            display = display,
-            ordinal = entry.project_display .. " " .. entry.name,
-          }
-        end,
+        entry_maker = make_entry,
       }),
       sorter = conf.generic_sorter(opts),
       previewer = previewers.new_buffer_previewer({
@@ -93,9 +97,13 @@ local function claude_code_picker(opts, select_key)
         end,
       }),
       attach_mappings = function(prompt_bufnr, map)
-        actions.select_default:replace(function()
+        local function close_picker()
           actions.close(prompt_bufnr)
+        end
+
+        actions.select_default:replace(function()
           local selection = action_state.get_selected_entry()
+          close_picker()
           if selection then
             tmux.select_window(selection.value.session_name, selection.value.id)
             split.open(selection.value.session_name)
@@ -107,7 +115,7 @@ local function claude_code_picker(opts, select_key)
         end
 
         local function action_new()
-          actions.close(prompt_bufnr)
+          close_picker()
           local project = require("claude-legion.project")
           local cur_session = project.get_session_name(project.get_project_root())
           local new_id = terminal.create(nil, { background = true })
@@ -117,7 +125,7 @@ local function claude_code_picker(opts, select_key)
         end
 
         local function action_new_shell()
-          actions.close(prompt_bufnr)
+          close_picker()
           local project = require("claude-legion.project")
           local cur_session = project.get_session_name(project.get_project_root())
           local new_id = terminal.create(nil, { background = true, shell = true })
@@ -131,7 +139,7 @@ local function claude_code_picker(opts, select_key)
           if selection then
             local key = make_key(selection.value.id, selection.value.session_name)
             terminal.kill(selection.value.id, selection.value.session_name)
-            actions.close(prompt_bufnr)
+            close_picker()
             vim.schedule(function()
               claude_code_picker(opts, key)
             end)
@@ -142,7 +150,7 @@ local function claude_code_picker(opts, select_key)
           local selection = action_state.get_selected_entry()
           if selection then
             terminal.persist(selection.value.id, selection.value.session_name)
-            actions.close(prompt_bufnr)
+            close_picker()
             vim.schedule(function()
               claude_code_picker(opts, make_key(selection.value.id, selection.value.session_name))
             end)
@@ -156,7 +164,8 @@ local function claude_code_picker(opts, select_key)
               if new_name and new_name ~= "" then
                 terminal.rename(selection.value.id, new_name, selection.value.session_name)
               end
-              pcall(actions.close, prompt_bufnr)
+              -- pcall because picker buffer may already be gone after async vim.ui.input
+              pcall(close_picker)
               vim.schedule(function()
                 claude_code_picker(opts, make_key(selection.value.id, selection.value.session_name))
               end)
@@ -166,7 +175,7 @@ local function claude_code_picker(opts, select_key)
 
         local function action_pin_all()
           terminal.persist_all()
-          actions.close(prompt_bufnr)
+          close_picker()
           vim.schedule(function()
             claude_code_picker(opts)
           end)
@@ -178,7 +187,7 @@ local function claude_code_picker(opts, select_key)
             local sname = selection.value.session_name
             local new_id = selection.value.id - 1
             terminal.move(selection.value.id, new_id, sname)
-            actions.close(prompt_bufnr)
+            close_picker()
             vim.schedule(function()
               claude_code_picker(opts, make_key(new_id, sname))
             end)
@@ -197,7 +206,7 @@ local function claude_code_picker(opts, select_key)
             if selection.value.id < max_id then
               local new_id = selection.value.id + 1
               terminal.move(selection.value.id, new_id, sname)
-              actions.close(prompt_bufnr)
+              close_picker()
               vim.schedule(function()
                 claude_code_picker(opts, make_key(new_id, sname))
               end)
@@ -224,7 +233,7 @@ local function claude_code_picker(opts, select_key)
         return true
       end,
     })
-    :find()
+  picker_obj:find()
 end
 
 local function worktree_picker(opts)

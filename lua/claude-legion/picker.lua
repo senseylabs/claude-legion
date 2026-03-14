@@ -7,11 +7,13 @@ local M = {}
 function M.select()
   local instances = terminal.list_all()
 
+  local status_icons = require("claude-legion.config").status_icons
   local items = {}
   for _, inst in ipairs(instances) do
     local type_icon = inst.type == "shell" and "🐚 " or "🤖 "
+    local status_icon = status_icons[inst.status] or status_icons.unknown
     table.insert(items, {
-      label = (inst.persistent and "📌 " or "   ") .. type_icon .. inst.project_display .. " - " .. inst.name,
+      label = status_icon .. " " .. (inst.persistent and "📌 " or "   ") .. type_icon .. inst.project_display .. " - " .. inst.name,
       id = inst.id,
       session_name = inst.session_name,
     })

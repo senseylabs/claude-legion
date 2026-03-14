@@ -297,4 +297,32 @@ function M.capture_pane_tail(session_name, window_id, lines)
   return nil
 end
 
+--- Capture last N lines from multiple panes in a single subprocess.
+--- Returns { [window_id] = content_string, ... }
+function M.capture_pane_tails_batch(session_name, window_ids, lines)
+  if not window_ids or #window_ids == 0 then return {} end
+  lines = lines or 5
+  -- Delimiter unlikely to appear in terminal output; includes NUL-separated prefix
+  local delimiter = "___CLAUDE_LEGION_PANE_SEP_f7a3b___"
+  local parts = {}
+  for _, wid in ipairs(window_ids) do
+    table.insert(parts, string.format(
+      "echo %s; tmux -L claude-legion capture-pane -t %s -p -S -%d 2>/dev/null",
+      vim.fn.shellescape(delimiter .. wid),
+      vim.fn.shellescape(session_name .. ":" .. wid),
+      lines
+    ))
+  end
+  local output = vim.fn.system(table.concat(parts, "; "))
+  local result = {}
+  local chunks = vim.split(output, delimiter, { plain = true })
+  for _, chunk in ipairs(chunks) do
+    local wid, content = chunk:match("^(%d+)\n(.*)")
+    if wid then
+      result[tonumber(wid)] = content
+    end
+  end
+  return result
+end
+
 return M

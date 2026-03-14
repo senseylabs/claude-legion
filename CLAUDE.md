@@ -20,6 +20,7 @@ All source is under `lua/`. The plugin has two module trees:
   - `init.lua` — Entry point. Registers 8 user commands (`ClaudeCode`, `ClaudeCodeNew`, `ClaudeCodeSelect`, `ClaudeCodeSend`, `ClaudeCodeKill`, `ClaudeCodePersist`, `ClaudeWorktreeCreate`, `ClaudeWorktreeList`), sets up keymaps, and wires autocommands.
   - `config.lua` — Default configuration and `setup()` merge logic. Sessions are scoped per project via directory path hashing.
   - `terminal.lua` — Instance lifecycle (create/toggle/kill/send). Manages state table of Claude Code instances. Handles auto-reconnect to orphaned tmux sessions.
+  - `status.lua` — Status detection for Claude Code and shell instances. Parses pane titles, detects input prompts via content matching, and provides `build_instance_list()` for batched status resolution.
   - `tmux.lua` — All tmux interaction via `vim.fn.system()`. Uses a dedicated socket (`-L claude-legion`). Manages popup display, window CRUD, and persistent markers via tmux window options (`@claude_persistent`, `@claude_name`).
   - `worktree.lua` — Git worktree creation/deletion/listing with tmux window integration.
   - `picker.lua` — Fallback instance picker using `vim.ui.select` when Telescope is unavailable.

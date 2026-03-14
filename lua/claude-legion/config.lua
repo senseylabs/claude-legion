@@ -27,6 +27,8 @@ M.defaults = {
   },
 }
 
+M.status_icons = { idle = "🟢", busy = "🔵", input = "🟡", dead = "⚫", unknown = "⚪" }
+
 M.options = {}
 
 function M.setup(opts)
