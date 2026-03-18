@@ -2,7 +2,7 @@ local M = {}
 
 M.defaults = {
   tmux = {
-    split_width = 0.40,
+    split_width = 0.50,
     session_prefix = "cl-",
   },
   cmd = "claude",
